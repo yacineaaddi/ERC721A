@@ -2,244 +2,190 @@
 
 pragma solidity 0.8.17;
 
-import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC20/IERC20.sol";
-import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC20/utils/SafeERC20.sol";
-import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/IERC721.sol";
-import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/security/ReentrancyGuard.sol";
-import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC20/ERC20.sol";
-import "https://github.com/yacineaaddi/Counter/blob/main/Secondetoken.sol";
+import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/utils/cryptography/MerkleProof.sol";
+/*import "https://github.com/chiru-labs/ERC721A/blob/main/contracts/ERC721A.sol";*/
+import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/access/Ownable.sol";
+/*import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/utils/Strings.sol";*/
+import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/common/ERC2981.sol";
+import "https://github.com/chiru-labs/ERC721A/blob/main/contracts/extensions/ERC721AQueryable.sol";
 
-contract ERC721Stacking is ReentrancyGuard {
 
-    using SafeERC20 for IERC20;
+contract NFTSol is ERC721AQueryable, ERC2981, Ownable {
 
-    IERC721 private immutable nftCollection;
-    SECONDETOKEN  private Rewarder;
+    uint256 public Maxsupply = 100;
+    uint256 public Maxmintperwallet = 40;
+    uint256 public price = 10000000000000 wei;
+    uint public wlSalePrice = 10000000000000 wei;
+    uint public publicSalePrice = 20000000000000 wei;
+    uint256 private constant Reservedtoken = 20;
+    uint256 public TotalMinted = 0 ;
+    bytes32 private merkleRoot = 0x2381a8aa5d4d4857e7625ba987686151bedcf5b39d8e1350a9df46bef13f2374;
+    bool public Issalesactive = false ;  
+    bool public WhithlistMint = false ; 
+    bool public PublicMint = false; 
+    string public Mintstate = "Not started";
+    string public BaseURI ;
+    string private BaseExtension = ".json";
+
+    mapping (address => uint256) public Mintedperwallet ;
+
+    enum Status {
+        Notstartedyet,
+        WhitelistSale,
+        PublicSale,
+        SoldOut
+    }
     
-    constructor (IERC721 _nftCollection,address tokenAddress) {
-        Rewarder = SECONDETOKEN (tokenAddress);
-        nftCollection = _nftCollection;}
+    Status public status;
 
+   constructor () ERC721A("TestCollection", "TC-TC"){
+        for (uint256 i = 1 ; i <= Reservedtoken ; ++i) {
+            _safeMint(payable(msg.sender) , 1  );}
+            Mintedperwallet[msg.sender] += Reservedtoken ;
+            TotalMinted = Reservedtoken;
+           }
 
-    struct StakedToken {
+/*-------------------------------------------------------------------------------------------------------------MODIFY DATA BY OWNER*/
 
-        address staker;
-        uint256 tokenId;}
+    function StartWLmint() public onlyOwner{
+      status = Status.WhitelistSale;
+      Mintstate = "WLActive";
+      Issalesactive = true;
+      price = wlSalePrice;}
 
-    
-    struct Staker {
+     function StartPBmint() public onlyOwner{
+      status = Status.PublicSale;
+      Mintstate = "PBActive";
+      Issalesactive = true;
+      price = publicSalePrice;}
 
-        uint256 amountStaked;
+     function setSoldOut() public onlyOwner{
+      Mintstate = "SoldOut";
+      status = Status.SoldOut;}
 
-        StakedToken[] stakedTokens;
-
-        uint256 timeOfLastUpdate;
-
-        uint256 unclaimedRewards;}
-
-        uint256 private rewardsPerHour = 1000;
-
-        mapping(address => Staker) public stakers;
-
-        mapping(uint256 => address ) public stakerAddress;
-
-
-/*---------------------------------------------------------------------------------------------------*/
-
-      /*  function Stake1(uint256 _tokenId) external nonReentrant {
-            if(stakers[msg.sender].amountStaked > 0){
-                uint256 rewards = calculateRewards(msg.sender);
-                stakers[msg.sender].unclaimedRewards += rewards ;
-            }
- 
-            require(nftCollection.ownerOf(_tokenId) == msg.sender, "You Dont Own This Token!");
-
-            nftCollection.transferFrom(msg.sender, address(this), _tokenId);
-
-            stakers[msg.sender].stakedTokens.push(StakedToken(msg.sender,_tokenId));
-
-            stakers[msg.sender].amountStaked++;
-            
-            stakerAddress[_tokenId] = msg.sender;
-
-            stakers[msg.sender].timeOfLastUpdate = block.timestamp;
-
-        }*/
-
-/*---------------------------------------------------------------------------------------------------*/
-
-        function StakeMany(uint256[] calldata _tokenId) public nonReentrant {
-            if(stakers[msg.sender].amountStaked > 0){
-                uint256 rewards = calculateRewards(msg.sender);
-                stakers[msg.sender].unclaimedRewards += rewards ;}
+     function setStatus(Status _status) public onlyOwner {
+        status = _status ;}
   
-            uint256 tokenID;
+    function ChangeMerkroot(bytes32 _merkleRoot) public onlyOwner {merkleRoot = _merkleRoot;}
 
-            for(uint256 i = 0 ; i < _tokenId.length ; i++){
+    function ToggleMintStatus() public onlyOwner {
+            Issalesactive = !Issalesactive;}
 
-            tokenID = _tokenId[i] ; 
 
-            require(nftCollection.ownerOf(tokenID) == msg.sender, "You Dont Own This Token !");
-
-           nftCollection.transferFrom(msg.sender, address(this), tokenID);
-
-            stakers[msg.sender].stakedTokens.push(StakedToken(msg.sender,tokenID));
-
-            stakers[msg.sender].amountStaked++;
-            
-            stakerAddress[tokenID] = msg.sender;
-
-            stakers[msg.sender].timeOfLastUpdate = block.timestamp; }
-
-        }
-/*---------------------------------------------------------------------------------------------------*/
-       /* function Unstake1(uint256 _tokenId) public nonReentrant {
-
-            require(stakers[msg.sender].amountStaked > 0 , "You Have No Token Staked !");
-            require(stakerAddress[_tokenId]  == msg.sender , "You Dont Own This Token!");
-            
-            uint256 rewards =  calculateRewards(msg.sender);
-            stakers[msg.sender].unclaimedRewards += rewards;
-
-            uint256 index = 0;
-            
-            for(uint256 i = 0 ; i < stakers[msg.sender].stakedTokens.length ; i++){
-                if(stakers[msg.sender].stakedTokens[i].tokenId == _tokenId){
-                    index = i;
-                    break;
-                }
+    function Setnftbaseuri(string memory _baseUri) public onlyOwner (){
+             BaseURI = _baseUri;
             }
 
-           stakers[msg.sender].stakedTokens[index].staker = address(0);
+    function setRoyaltyInfo(address _receiver, uint96 _royaltyFeesInBips) public onlyOwner {
+            _setDefaultRoyalty(_receiver, _royaltyFeesInBips );}
 
-            stakers[msg.sender].amountStaked--;
+    function ChangeTotalsupply(uint256 _Newsupply) public onlyOwner {
+            Maxsupply = _Newsupply ;}
 
-            stakerAddress[_tokenId] = address(0);
- 
-            nftCollection.transferFrom(address(this), msg.sender, _tokenId);
+    function ChangeWLprice(uint256 _NewWLprice) public onlyOwner {
+            wlSalePrice = _NewWLprice ;}
 
-            stakers[msg.sender].timeOfLastUpdate = block.timestamp;
+    function ChangePBprice(uint256 _NewPBprice) public onlyOwner {
+            publicSalePrice = _NewPBprice ;}
 
-
-        }*/
-
-/*---------------------------------------------------------------------------------------------------*/
-
-        function UnStakeMany(uint256[] calldata _tokenId) public nonReentrant {
-
-            uint256 rewards =  calculateRewards(msg.sender);
-            stakers[msg.sender].unclaimedRewards += rewards;
+/*------------------------------------------------------------------------------------------------------------- WHITLIST MINT*/
 
 
-            for(uint256 i = 0 ; i < _tokenId.length ;  i++){
- 
-            uint256 tokenId;
+    function WhitlistMint(uint256 _NumToken, bytes32[] calldata _proof) public payable {
 
-            tokenId = _tokenId[i];
-   
-             require(stakers[msg.sender].amountStaked > 0 , "You Have No Token Staked !");
-             require(stakerAddress[tokenId]  == msg.sender , "You Dont Own This Token!");
+        
+        bytes32 leaf = keccak256(abi.encodePacked(msg.sender));
+        require(status == Status.WhitelistSale, "WL sale is not active");
+        require(MerkleProof.verify(_proof, merkleRoot, leaf),"You are not whitlisted");
+        require(Issalesactive,"Mint is paused");
+        require( _NumToken <= Maxmintperwallet ,"Cannot mint more than 40");
+        require( Mintedperwallet[msg.sender] + _NumToken <= Maxmintperwallet ,"Max mint reached");
+        uint256 CurrentTotalMinted = TotalMinted ;
+        require(CurrentTotalMinted + _NumToken <=  Maxsupply , "Total Mint Reached" );
+        require( _NumToken * price >= msg.value , "Insufficient funds");
 
-             uint256 index = 0;
-           
-          for(uint256 i = 0 ; i < stakers[msg.sender].stakedTokens.length ; i++){
-                if(stakers[msg.sender].stakedTokens[i].tokenId == tokenId){
-                    index = i;
-                    break;}}
-
-            delete stakers[msg.sender].stakedTokens[index].staker ;
-
-            delete stakerAddress[tokenId] ;
-
-            stakers[msg.sender].amountStaked--;
-
-            stakers[msg.sender].timeOfLastUpdate = block.timestamp;
-
-            nftCollection.transferFrom(address(this), msg.sender, tokenId);
-
-            }}
-/*---------------------------------------------------------------------------------------------------*/
-
-        function NFTStaked(address _user) public view returns (uint256){
-            return stakers[_user].amountStaked;        }
+        for (uint256 i = 1 ; i <= _NumToken  ; ++i){
+           _safeMint(payable(msg.sender) , 1 );} 
 
 
-            
-/*---------------------------------------------------------------------------------------------------*/
-        function calculateRewards(address _staker) public view returns (uint256){
-            return( ( ((  ( block.timestamp - stakers[_staker].timeOfLastUpdate) * stakers[_staker].amountStaked )) * rewardsPerHour) / 3600 ) ;
-        }
-/*---------------------------------------------------------------------------------------------------*/
-      /*  function Myrewards1() public view returns (uint256){
-            uint256 rewards = calculateRewards(msg.sender) + stakers[msg.sender].unclaimedRewards;
-            return rewards;
-        }*/
-/*---------------------------------------------------------------------------------------------------*/
-        function Myrewards(address _user) public view returns (uint256){
-            uint256 reward = (block.timestamp - stakers[_user].timeOfLastUpdate) * stakers[_user].amountStaked;
-            uint256 rewards = ((reward * rewardsPerHour) / 3600 );
-            uint256 Totalrewards = rewards + stakers[_user].unclaimedRewards;
-            return Totalrewards;
-        }
-/*----------------------------------------------------------*/
-        function Claim(uint256 amount) public payable {
+        Mintedperwallet[msg.sender] += _NumToken ;
+        TotalMinted += _NumToken ;  }
 
-            
-            uint256 rewards =  calculateRewards(msg.sender);
-            stakers[msg.sender].unclaimedRewards += rewards;
-            uint256 reward = stakers[msg.sender].unclaimedRewards;
-
-            require(amount <= reward , "You Cannot get more than your rewards");
-
-            if(amount < reward){
-            
-            uint256 Rest = reward - amount ;
-            stakers[msg.sender].unclaimedRewards = Rest ;
-            stakers[msg.sender].timeOfLastUpdate = block.timestamp;
-            Rewarder._MintToken(msg.sender,amount);}
-
-            else {
-
-            stakers[msg.sender].unclaimedRewards = 0 ;
-            stakers[msg.sender].timeOfLastUpdate = block.timestamp;
-            Rewarder._MintToken(msg.sender,reward);
-            
-            }}
+/*------------------------------------------------------------------------------------------------------------- PUBLIC MINT*/
 
 
- /*---------------------------------------------------------------------------------------------------*/   
+        function Publicmint(uint256 _NumToken) public payable {
 
-        function BalanceOf(address _user) public view returns(uint256){
-            uint256 balance = nftCollection.balanceOf(_user);
-            return balance ;
+        require(status == Status.PublicSale, "PB sale is not active");
+        require(Issalesactive,"The sales is paused");
+        require( _NumToken <= Maxmintperwallet ,"Cannot mint more than 40");
+        require( Mintedperwallet[msg.sender] + _NumToken <= Maxmintperwallet ,"Max mint reached");
+        uint256 CurrentTotalMinted = TotalMinted ;
+        require(CurrentTotalMinted + _NumToken <=  Maxsupply , "Total Mint Reached" );
+        require( _NumToken * price >= msg.value , "Insufficient funds");
 
+        for (uint256 i = 1 ; i <= _NumToken  ; ++i){
+           _safeMint(payable(msg.sender) , 1 );} 
+
+
+        Mintedperwallet[msg.sender] += _NumToken ;
+        TotalMinted += _NumToken ;}
+
+
+        function BurnToken(uint256 tokenId) public {
+            _burn(tokenId);
         }
 
-        function UnstakedNFTids(address _user) public view returns(uint256[] memory){
-           uint256[] memory Ids = nftCollection.tokensOfOwner(_user);
-           return Ids ;}
-/*---------------------------------------------------------------------------------------------------*/   
+
+/*------------------------------------------------------------------------------------------------------------- WITHDRAW FUNDS BY OWNER*/
+
+        function Withdraw() public onlyOwner {
+
+            uint256 BALANCE = address(this).balance ;
+            uint256 BalanceOne = BALANCE * 50 /100 ;
+            uint256 BalanceTwo = BALANCE * 50 /100 ;
+            (bool TransferOne,) = address(0x328c956838d99bD665505965d001DA813044791a).call{value : BalanceOne}("");
+            (bool TransferTwo,) = address(0x328c956838d99bD665505965d001DA813044791a).call{value : BalanceTwo}("");
+            require(TransferOne && TransferTwo, "Withdraw Money Failed");}
 
 
-        function getStakedTokens(address _user) public view returns (StakedToken[] memory){
-            if(stakers[_user].amountStaked > 0 ){
-                StakedToken[] memory _stakedTokens = new StakedToken[](stakers[_user].amountStaked);
-                uint256 _index = 0 ;
 
-                for(uint256 j = 0 ; j < stakers[_user].stakedTokens.length ; j++){
-                    if(stakers[_user].stakedTokens[j].staker != (address(0))){
-                        _stakedTokens[_index] = stakers[_user].stakedTokens[j];
-                        _index++;
-                    
-                    }}
+/*-------------------------------------------------------------------------------------------------------------*/
 
-                    
-                return _stakedTokens;
-            }
-            
-            else {return new StakedToken[](0); }
-
-            }
-
+     function tokensOfOwner(address owner) public view virtual override(ERC721AQueryable) returns (uint256[] memory) {
+        uint256 start = _startTokenId();
+        uint256 stop = _nextTokenId();
+        uint256[] memory tokenIds;
+        if (start != stop) tokenIds = _tokensOfOwnerIn(owner, start, stop);
+        return tokenIds;
     }
 
+/*-------------------------------------------------------------------------------------------------------------*/
+
+        
+            function tokenURI(uint256 tokenId) public view  override(ERC721A,IERC721A) returns (string memory) {
+            if (!_exists(tokenId)) _revert(URIQueryForNonexistentToken.selector);
+
+            string memory baseURI = _baseURI();
+            return bytes(baseURI).length != 0 ? string(abi.encodePacked(baseURI, _toString(tokenId), BaseExtension)) : "";
+            }
+
+
+            function _baseURI() override internal view returns (string memory) {
+            return BaseURI;
+            }
+
+            function _startTokenId() internal pure override returns (uint256) {
+             return 1 ;
+            }
+
+
+            function CalculateRoyalties(uint256 _salePrice, uint256 royaltyFeesInBips) pure public returns (uint256){
+                return (_salePrice  * royaltyFeesInBips) / 100  ;
+            }
+            
+             function supportsInterface(bytes4 interfaceId) public view virtual override(ERC2981, ERC721A,IERC721A) returns (bool) {
+             return interfaceId == type(IERC2981).interfaceId || super.supportsInterface(interfaceId);
+             }
+
+}
